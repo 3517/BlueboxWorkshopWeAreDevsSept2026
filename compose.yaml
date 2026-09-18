@@ -1,0 +1,100 @@
+services:
+  shop:
+    image: docker.io/library/node:22-alpine
+    network_mode: host
+    command: ["node", "--require", "/workshop/otel.js", "/workshop/server.js"]
+    environment:
+      PORT: 8088
+      POSTGREST_URL: http://localhost:3000
+      PAYMENT_URL: http://localhost:4004
+      OTEL_SERVICE_NAME: ${OTEL_SERVICE_NAME_SHOP:-shop-api}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+      OTEL_EXPORTER_OTLP_HEADERS: ${OTEL_EXPORTER_OTLP_HEADERS:-}
+      OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
+      OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE: delta
+      OTEL_RESOURCE_ATTRIBUTES: ${OTEL_RESOURCE_ATTRIBUTES:-deployment.environment.name=local}
+    volumes:
+      - ./:/workshop:ro
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:8088/api/products').then(response => { if (!response.ok) process.exit(1); }).catch(() => process.exit(1))"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+    depends_on:
+      postgrest:
+        condition: service_healthy
+      payment:
+        condition: service_healthy
+
+  payment:
+    image: docker.io/library/node:22-alpine
+    network_mode: host
+    command: ["node", "--require", "/workshop/otel.js", "/workshop/payment.js"]
+    environment:
+      PORT: 4004
+      OTEL_SERVICE_NAME: ${OTEL_SERVICE_NAME_PAYMENT:-payment}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+      OTEL_EXPORTER_OTLP_HEADERS: ${OTEL_EXPORTER_OTLP_HEADERS:-}
+      OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
+      OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE: delta
+      OTEL_RESOURCE_ATTRIBUTES: ${OTEL_RESOURCE_ATTRIBUTES:-deployment.environment.name=local}
+    volumes:
+      - ./:/workshop:ro
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:4004/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  postgresql:
+    image: docker.io/library/postgres:17-alpine
+    network_mode: host
+    environment:
+      POSTGRES_DB: shop
+      POSTGRES_USER: shop
+      POSTGRES_PASSWORD: shop
+    volumes:
+      - workshop-db:/var/lib/postgresql/data
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U shop -d shop"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  postgrest:
+    image: docker.io/postgrest/postgrest:v12.2.12
+    network_mode: host
+    environment:
+      PGRST_SERVER_HOST: 0.0.0.0
+      PGRST_DB_URI: postgres://shop:shop@localhost:5432/shop
+      PGRST_DB_SCHEMAS: public
+      PGRST_DB_ANON_ROLE: web_anon
+      PGRST_JWT_SECRET: workshop-only-secret
+    depends_on:
+      postgresql:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "postgrest", "--version"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  load-generator:
+    image: docker.io/grafana/k6:0.55.0
+    network_mode: host
+    profiles: [loadgen]
+    command: ["run", "/scripts/smoke.js"]
+    environment:
+      TARGET_URL: http://localhost:8088
+      VUS: 10
+      DURATION: 60s
+    volumes:
+      - ./loadgen/smoke.js:/scripts/smoke.js:ro
+    depends_on:
+      shop:
+        condition: service_started
+
+volumes:
+  workshop-db:
