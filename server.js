@@ -42,7 +42,11 @@ const database = async (url, options = {}) => {
     databasePool.push(connection);
   }
 };
-const mapProduct = product => ({ ...product, priceCents: product.price_cents, price_cents: undefined });
+const SALE_PRODUCT_IDS = new Set(['aurora-mug', 'signal-notebook']);
+const mapProduct = product => {
+  const onSale = SALE_PRODUCT_IDS.has(product.id);
+  return { ...product, priceCents: product.price_cents, price_cents: undefined, onSale, salePriceCents: onSale ? Math.round(product.price_cents * 0.8) : undefined };
+};
 const cart = userId => database(`/carts?user_id=eq.${encodeURIComponent(userId)}&select=quantity,products(*)`).then(items => items.map(item => ({ product: mapProduct(item.products), quantity: item.quantity })));
 
 async function route(req, res, url) {
