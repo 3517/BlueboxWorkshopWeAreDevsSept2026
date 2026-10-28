@@ -67,7 +67,7 @@ async function route(req, res, url) {
     const orderId = `order_${randomUUID().slice(0, 8)}`;
     const charge = attempt => {
       const controller = new AbortController(); const timeout = setTimeout(() => controller.abort(), 150);
-      return fetch(`${paymentUrl}/charge`, { method: 'POST', signal: controller.signal, headers: { 'content-type': 'application/json' }, body: JSON.stringify({ amountCents: totalCents, email: input.email, orderId, attempt, cardLast4: input.cardNumber?.slice(-4) }) }).then(response => response.json()).finally(() => clearTimeout(timeout));
+      return fetch(`${paymentUrl}/charge`, { method: 'POST', signal: controller.signal, headers: { 'content-type': 'application/json' }, body: JSON.stringify({ amountCents: totalCents, email: input.email, orderId, attempt, cardLast4: input.cardNumber?.slice(-4) }) }).then(response => { if (!response.ok) throw new Error(`payment service returned ${response.status}`); return response.json(); }).finally(() => clearTimeout(timeout));
     };
     let payment;
     try { payment = await charge(1); } catch (error) {
